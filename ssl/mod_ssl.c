@@ -136,6 +136,11 @@ static const command_rec ssl_config_cmds[] = {
     SSL_CMD_SRV(SessionCacheTimeout, TAKE1,
                 "SSL Session Cache object lifetime "
                 "('N' - number of seconds)")
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    SSL_CMD_SRV(SessionResumeTimeout, TAKE1, 
+                "SSL Session Cache object resume lifetime " 
+                "('N' - number of seconds)")
+#endif
 #ifdef OPENSSL_NO_SSL3
 #define SSLv3_PROTO_PREFIX ""
 #else

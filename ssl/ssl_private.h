@@ -17,6 +17,11 @@
 #ifndef SSL_PRIVATE_H
 #define SSL_PRIVATE_H
 
+// AvApache (Logout option) - disable
+//#define AVAPACHE_NOT_USE_LOGOUT
+// AvApache (SSLSessionResumeTimeout option) - enable (the library mod_secsocache_av.so is needed)
+//#define SESSIONRESUMETIMEOUT_AV_SUPPORT
+
 /**
  * @file  ssl_private.h
  * @brief Internal interfaces private to mod_ssl.
@@ -53,7 +58,11 @@
 #include "apr_strings.h"
 #include "apr_global_mutex.h"
 #include "apr_optional.h"
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+#include "ap_secsocache.h"
+#else
 #include "ap_socache.h"
+#endif
 #include "mod_auth.h"
 
 /* The #ifdef macros are only defined AFTER including the above
@@ -374,6 +383,12 @@ APLOG_USE_MODULE(ssl);
 #define SSL_SESSION_CACHE_TIMEOUT  300
 #endif
 
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+#ifndef SSL_SESSION_RESUME_TIMEOUT
+#define SSL_SESSION_RESUME_TIMEOUT  300
+#endif
+#endif
+
 /* Default setting for per-dir reneg buffer. */
 #ifndef DEFAULT_RENEG_BUFFER_SIZE
 #define DEFAULT_RENEG_BUFFER_SIZE (128 * 1024)
@@ -410,6 +425,10 @@ APLOG_USE_MODULE(ssl);
 #define SSL_OPT_STRICTREQUIRE  (1<<5)
 #define SSL_OPT_OPTRENEGOTIATE (1<<6)
 #define SSL_OPT_LEGACYDNFORMAT (1<<7)
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+// AvApache - Logout option
+#define SSL_OPT_LOGOUT         (1<<8)
+#endif
 typedef int ssl_opt_t;
 
 /**
@@ -429,6 +448,12 @@ typedef int ssl_opt_t;
 #define SSL_PROTOCOL_TLSV1_1 (1<<3)
 #define SSL_PROTOCOL_TLSV1_2 (1<<4)
 #define SSL_PROTOCOL_TLSV1_3 (1<<5)
+
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+// AvApache - Logout option
+// SSL_HAVE_PROTOCOL_TLSV1_3 - Not work Logout
+#undef SSL_OP_NO_TLSv1_3
+#endif
 
 #ifdef SSL_OP_NO_TLSv1_3
 #define SSL_HAVE_PROTOCOL_TLSV1_3   (1)
@@ -653,7 +678,11 @@ typedef struct {
 
     /* The configured provider, and associated private data
      * structure. */
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    const ap_sec_socache_provider_t *sesscache;
+#else
     const ap_socache_provider_t *sesscache;
+#endif
     ap_socache_instance_t *sesscache_context;
 
     apr_global_mutex_t   *pMutex;
@@ -831,6 +860,9 @@ struct SSLSrvConfigRec {
     const char      *vhost_id;
     int              vhost_id_len;
     int              session_cache_timeout;
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    int              session_resume_timeout;
+#endif
     BOOL             cipher_server_pref;
     BOOL             insecure_reneg;
     modssl_ctx_t    *server;
@@ -903,6 +935,9 @@ const char  *ssl_cmd_SSLSessionTickets(cmd_parms *, void *, int flag);
 const char  *ssl_cmd_SSLVerifyClient(cmd_parms *, void *, const char *);
 const char  *ssl_cmd_SSLVerifyDepth(cmd_parms *, void *, const char *);
 const char  *ssl_cmd_SSLSessionCache(cmd_parms *, void *, const char *);
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+const char  *ssl_cmd_SSLSessionResumeTimeout(cmd_parms *, void *, const char *);
+#endif
 const char  *ssl_cmd_SSLSessionCacheTimeout(cmd_parms *, void *, const char *);
 const char  *ssl_cmd_SSLProtocol(cmd_parms *, void *, const char *);
 const char  *ssl_cmd_SSLOptions(cmd_parms *, void *, const char *);
@@ -1028,6 +1063,11 @@ BOOL         ssl_scache_store(server_rec *, IDCONST UCHAR *, int,
 SSL_SESSION *ssl_scache_retrieve(server_rec *, IDCONST UCHAR *, int, apr_pool_t *);
 void         ssl_scache_remove(server_rec *, IDCONST UCHAR *, int,
                                apr_pool_t *);
+
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+void         ssl_scache_remove_all_of_peer(server_rec *, // AvApache - Logout option
+                                           X509 *, apr_pool_t *);
+#endif
 
 /** OCSP Stapling Support */
 #ifdef HAVE_OCSP_STAPLING

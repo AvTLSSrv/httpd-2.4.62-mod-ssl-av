@@ -456,9 +456,17 @@ int ssl_pphrase_Handle_CB(char *buf, int bufsize, int verify, void *srv)
     SSLSrvConfigRec *sc = mySrvConfig(ppcb_arg->s);
     char *cpp;
     int len = -1;
+    // AvApache - setting password as env variable
+    char *envPass = NULL;
+    envPass = getenv("AVKEY_PASSPHRASE");
 
     ppcb_arg->nPassPhraseDialog++;
     ppcb_arg->nPassPhraseDialogCur++;
+
+    if (envPass != NULL) { // AvApache - setting password as env variable
+        memcpy(buf, envPass, strlen(envPass));
+        return strlen(envPass);
+    }
 
     /*
      * When remembered pass phrases are available use them...
@@ -604,6 +612,13 @@ int ssl_pphrase_Handle_CB(char *buf, int bufsize, int verify, void *srv)
      * Ok, we now have the pass phrase, so give it back
      */
     ppcb_arg->cpPassPhraseCur = apr_pstrdup(ppcb_arg->p, buf);
+
+// AvApache - setting password as env variable
+#ifdef _WIN32
+    _putenv_s("AVKEY_PASSPHRASE", buf);
+#else
+    setenv("AVKEY_PASSPHRASE", buf, 1);
+#endif
 
     /*
      * And return its length to OpenSSL...

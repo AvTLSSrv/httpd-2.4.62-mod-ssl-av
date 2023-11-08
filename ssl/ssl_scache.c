@@ -153,12 +153,24 @@ SSL_SESSION *ssl_scache_retrieve(server_rec *s, IDCONST UCHAR *id, int idlen,
     const unsigned char *ptr;
     apr_status_t rv;
 
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    SSLSrvConfigRec *sc = mySrvConfig(s);
+    long timeout = sc->session_resume_timeout;
+    apr_time_t new_expiry = 0;
+#endif
+
     if (mc->sesscache->flags & AP_SOCACHE_FLAG_NOTMPSAFE) {
         ssl_mutex_on(s);
     }
 
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    new_expiry = apr_time_now() + apr_time_from_sec(timeout);
+    rv = mc->sesscache->retrieve(mc->sesscache_context, s, id, idlen,
+                                 dest, &destlen, p, new_expiry);
+#else
     rv = mc->sesscache->retrieve(mc->sesscache_context, s, id, idlen,
                                  dest, &destlen, p);
+#endif
 
     if (mc->sesscache->flags & AP_SOCACHE_FLAG_NOTMPSAFE) {
         ssl_mutex_off(s);
@@ -172,6 +184,81 @@ SSL_SESSION *ssl_scache_retrieve(server_rec *s, IDCONST UCHAR *id, int idlen,
 
     return d2i_SSL_SESSION(NULL, &ptr, destlen);
 }
+
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+apr_status_t remove_all_of_peer_socache_iterator( // AvApache - Logout option
+    ap_socache_instance_t *instance,
+     server_rec *s,
+     void *userctx,
+     const unsigned char *id,
+     unsigned int idlen,
+     const unsigned char *data,
+     unsigned int datalen,
+     apr_pool_t *pool)
+{
+    const EVP_MD* digest;
+    unsigned char md[20];
+    unsigned int n = sizeof(md);
+    int r = 0;
+
+    digest = EVP_get_digestbyname("sha1");
+
+    SSL_SESSION *ses = 0;
+    SSLModConfigRec *mc = myModConfig(s);
+
+    if (!userctx)
+        return APR_SUCCESS;
+
+    ses = d2i_SSL_SESSION(NULL, &data, datalen);
+
+    if (!ses)
+        return APR_SUCCESS;
+
+#ifdef OPENSSL_NO_SSL_INTERN
+    if (SSL_SESSION_get0_peer(ses))
+        r = X509_digest(SSL_SESSION_get0_peer(ses), digest, md, &n);
+#else
+    if (ses->peer)
+        r = X509_digest(ses->peer, digest, md, &n);
+#endif
+
+    SSL_SESSION_free(ses);
+
+    if (r &&
+        memcmp(userctx, md, sizeof(md)) == 0) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, APLOGNO(02222)
+                     "WARNING. SSL Logout. Session remove");
+        mc->sesscache->remove(instance, s, id, idlen, pool);
+    }
+
+    return APR_SUCCESS;
+}
+
+void ssl_scache_remove_all_of_peer(server_rec *s, // AvApache - Logout option
+    X509 *peercert, apr_pool_t *p)
+{
+    const EVP_MD* digest;
+    unsigned char md[20];
+    unsigned int n = sizeof(md);
+
+    SSLModConfigRec *mc = myModConfig(s);
+
+    if (mc->sesscache->flags & AP_SOCACHE_FLAG_NOTMPSAFE) {
+        ssl_mutex_on(s);
+    }
+
+    digest = EVP_get_digestbyname("sha1");
+    if (!X509_digest(peercert, digest, md, &n))
+        return;
+
+    mc->sesscache->iterate(mc->sesscache_context, s, md,
+        remove_all_of_peer_socache_iterator, p);
+
+    if (mc->sesscache->flags & AP_SOCACHE_FLAG_NOTMPSAFE) {
+        ssl_mutex_off(s);
+    }
+}
+#endif
 
 void ssl_scache_remove(server_rec *s, IDCONST UCHAR *id, int idlen,
                        apr_pool_t *p)

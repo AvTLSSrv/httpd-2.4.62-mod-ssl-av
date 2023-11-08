@@ -314,6 +314,12 @@ apr_status_t ssl_init_Module(apr_pool_t *p, apr_pool_t *plog,
             sc->session_cache_timeout = SSL_SESSION_CACHE_TIMEOUT;
         }
 
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+        if (sc->session_resume_timeout == UNSET) {
+            sc->session_resume_timeout = SSL_SESSION_RESUME_TIMEOUT;
+        }
+#endif
+
         if (sc->server && sc->server->pphrase_dialog_type == SSL_PPTYPE_UNSET) {
             sc->server->pphrase_dialog_type = SSL_PPTYPE_BUILTIN;
         }

@@ -1063,6 +1063,29 @@ static int ssl_hook_Access_classic(request_rec *r, SSLSrvConfigRec *sc, SSLDirCo
         }
     }
 
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+    if (ssl && (SSL_version(ssl) < TLS1_3_VERSION) && // AvApache - Logout option
+        (dc->nOptions & SSL_OPT_LOGOUT) &&
+        (peercert = SSL_get_peer_certificate(ssl)) != NULL) {
+        cipher = SSL_get_current_cipher(ssl);
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(02222)
+                             "WARNING. SSL Logout. "
+                             "Clearing the access cache for %s using cipher %s",
+                              r->filename,
+                              SSL_CIPHER_get_name(cipher));
+        conn_rec *conn = (conn_rec *)SSL_get_app_data(ssl);
+        server_rec *srv_rec  = mySrvFromConn(conn);
+
+        ssl_scache_remove_all_of_peer(srv_rec,
+            peercert, conn->pool);
+        X509_free(peercert);
+
+//        ssl3_send_alert(ssl, SSL3_AL_WARNING, SSL_AD_NO_RENEGOTIATION); // Error link - temporarily
+//        modssl_smart_shutdown(ssl); // SSL_shutdown(ssl);
+        ssl3_send_alert_ext(ssl, SSL3_AL_WARNING, SSL_AD_NO_RENEGOTIATION); 
+    }
+#endif
+
     return DECLINED;
 }
 
@@ -1269,6 +1292,13 @@ int ssl_hook_Access(request_rec *r)
     /* TLSv1.3+ is less complicated here. Branch off into a new codeline
      * and avoid messing with the past. */
     if (SSL_version(ssl) >= TLS1_3_VERSION) {
+//AvApache - Logout option
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+        if (dc->nOptions & SSL_OPT_LOGOUT)
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(02222)
+                "WARNING. SSL Logout."
+                "SSL_version(ssl) >= TLS1_3_VERSION - Not work Logout!");
+#endif
         ret = ssl_hook_Access_modern(r, sc, dc, sslconn, ssl);
     }
     else
@@ -2052,7 +2082,11 @@ static void ssl_session_log(server_rec *s,
 
     if (timeout) {
         apr_snprintf(timeout_str, sizeof(timeout_str),
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+                     "resume timeout=%lds ", timeout);
+#else
                      "timeout=%lds ", timeout);
+#endif
     }
 
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, s,
@@ -2075,7 +2109,12 @@ int ssl_callback_NewSessionCacheEntry(SSL *ssl, SSL_SESSION *session)
     conn_rec *conn      = (conn_rec *)SSL_get_app_data(ssl);
     server_rec *s       = mySrvFromConn(conn);
     SSLSrvConfigRec *sc = mySrvConfig(s);
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    long cache_timeout  = sc->session_cache_timeout;
+    long resume_timeout = sc->session_resume_timeout;
+#else
     long timeout        = sc->session_cache_timeout;
+#endif
     BOOL rc;
     IDCONST unsigned char *id;
     unsigned int idlen;
@@ -2084,7 +2123,11 @@ int ssl_callback_NewSessionCacheEntry(SSL *ssl, SSL_SESSION *session)
      * Set the timeout also for the internal OpenSSL cache, because this way
      * our inter-process cache is consulted only when it's really necessary.
      */
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    SSL_set_timeout(session, cache_timeout);
+#else
     SSL_set_timeout(session, timeout);
+#endif
 
     /*
      * Store the SSL_SESSION in the inter-process cache with the
@@ -2099,12 +2142,20 @@ int ssl_callback_NewSessionCacheEntry(SSL *ssl, SSL_SESSION *session)
 
     rc = ssl_scache_store(s, id, idlen,
                           apr_time_from_sec(SSL_SESSION_get_time(session)
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+                                          + resume_timeout),
+#else
                                           + timeout),
+#endif
                           session, conn->pool);
 
     ssl_session_log(s, "SET", id, idlen,
                     rc == TRUE ? "OK" : "BAD",
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+                    "caching", resume_timeout);
+#else
                     "caching", timeout);
+#endif
 
     /*
      * return 0 which means to OpenSSL that the session is still
@@ -2210,6 +2261,18 @@ static void log_tracing_state(const SSL *ssl, conn_rec *c,
         ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c,
                       "%s: Loop: %s",
                       MODSSL_LIBRARY_NAME, SSL_state_string_long(ssl));
+// AvApache EMS update
+        if (getenv("AVCSP_DEBUG") && SSL_ems_string_long(ssl, 0, TLS_ST_SW_SRVR_HELLO)!=NULL) { // AvApache works only for TLS 1.2
+           ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c,
+                      "%s: extended master secret: %s",
+                      MODSSL_LIBRARY_NAME, SSL_ems_string_long(ssl, 0, TLS_ST_SW_SRVR_HELLO));
+           ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c,
+                      "%s: extended master secret: %s",
+                      MODSSL_LIBRARY_NAME, SSL_ems_string_long(ssl, 1, TLS_ST_SW_SRVR_HELLO));
+           ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c,
+                      "%s: extended master secret: %s",
+                      MODSSL_LIBRARY_NAME, SSL_ems_string_long(ssl, 2, TLS_ST_SW_SRVR_HELLO));
+        }
     }
     else if (where & SSL_CB_READ) {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c,

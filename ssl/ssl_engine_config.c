@@ -223,6 +223,9 @@ static SSLSrvConfigRec *ssl_config_server_new(apr_pool_t *p)
     sc->vhost_id               = NULL;  /* set during module init */
     sc->vhost_id_len           = 0;     /* set during module init */
     sc->session_cache_timeout  = UNSET;
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    sc->session_resume_timeout = UNSET;
+#endif
     sc->cipher_server_pref     = UNSET;
     sc->insecure_reneg         = UNSET;
 #ifdef HAVE_TLSEXT
@@ -395,6 +398,9 @@ void *ssl_config_server_merge(apr_pool_t *p, void *basev, void *addv)
     cfgMerge(mc, NULL);
     cfgMerge(enabled, SSL_ENABLED_UNSET);
     cfgMergeInt(session_cache_timeout);
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+    cfgMergeInt(session_resume_timeout);
+#endif
     cfgMergeBool(cipher_server_pref);
     cfgMergeBool(insecure_reneg);
 #ifdef HAVE_TLSEXT
@@ -1276,6 +1282,13 @@ const char *ssl_cmd_SSLSessionCache(cmd_parms *cmd,
         }
 
         /* Find the provider of given name. */
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+        mc->sesscache = ap_lookup_provider(AP_SEC_SOCACHE_PROVIDER_GROUP,
+                                           name,
+                                           AP_SEC_SOCACHE_PROVIDER_VERSION);
+
+        if (!mc->sesscache)
+#endif
         mc->sesscache = ap_lookup_provider(AP_SOCACHE_PROVIDER_GROUP,
                                            name,
                                            AP_SOCACHE_PROVIDER_VERSION);
@@ -1292,8 +1305,13 @@ const char *ssl_cmd_SSLSessionCache(cmd_parms *cmd,
             /* Build a comma-separated list of all registered provider
              * names: */
             name_list = ap_list_provider_names(cmd->pool,
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+                                               AP_SEC_SOCACHE_PROVIDER_GROUP,
+                                               AP_SEC_SOCACHE_PROVIDER_VERSION);
+#else
                                                AP_SOCACHE_PROVIDER_GROUP,
                                                AP_SOCACHE_PROVIDER_VERSION);
+#endif
             all_names = apr_array_pstrcat(cmd->pool, name_list, ',');
 
             err = apr_psprintf(cmd->pool, "'%s' session cache not supported "
@@ -1324,6 +1342,23 @@ const char *ssl_cmd_SSLSessionCacheTimeout(cmd_parms *cmd,
 
     return NULL;
 }
+
+#ifdef SESSIONRESUMETIMEOUT_AV_SUPPORT /* AvApache */
+const char *ssl_cmd_SSLSessionResumeTimeout(cmd_parms *cmd,
+                                           void *dcfg,
+                                           const char *arg)
+{
+    SSLSrvConfigRec *sc = mySrvConfig(cmd->server);
+	
+    sc->session_resume_timeout = atoi(arg);
+ 	
+    if (sc->session_resume_timeout < 0) {
+        return "SSLSessionResumeTimeout: Invalid argument";
+    }
+	
+   return NULL;
+}
+#endif
 
 const char *ssl_cmd_SSLOptions(cmd_parms *cmd,
                                void *dcfg,
@@ -1364,6 +1399,11 @@ const char *ssl_cmd_SSLOptions(cmd_parms *cmd,
         else if (strcEQ(w, "LegacyDNStringFormat")) {
             opt = SSL_OPT_LEGACYDNFORMAT;
         }
+#ifndef AVAPACHE_NOT_USE_LOGOUT
+        else if (strcEQ(w, "Logout")) { // AvApache - Logout option
+            opt = SSL_OPT_LOGOUT;
+        }
+#endif
         else {
             return apr_pstrcat(cmd->pool,
                                "SSLOptions: Illegal option '", w, "'",
