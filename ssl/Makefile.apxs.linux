@@ -1,0 +1,72 @@
+ifndef INST_PATH
+ INST_PATH = /opt/AvTLSSrv
+endif
+
+ifndef APXS
+ APXS = $(INST_PATH)/bin/apxs 
+endif
+
+ifndef OPENSSL_VERSION
+ OPENSSL_VERSION=3.0.13
+endif
+
+ifndef OPENSSL_LIB_DIR_NAME
+ ifneq (,$(findstring 1.1.1,$(OPENSSL_VERSION)))
+  OPENSSL_LIB_DIR_NAME=lib
+ else
+  ifneq (,$(findstring 3.0.,$(OPENSSL_VERSION)))
+   OPENSSL_LIB_DIR_NAME=lib64
+  endif
+ endif
+endif
+
+LIBS = -L$(INST_PATH)/$(OPENSSL_LIB_DIR_NAME) -lcrypto -lssl
+
+INCLUDE = -I../md
+
+FLAGS = -I../md
+ifdef NOT_USE_1_1_1
+DEF = \
+	-D NO_IDEA \
+	-D NO_RC5 \
+	-D NO_MDC2 \
+	-D OPENSSL_NO_IDEA \
+	-D OPENSSL_NO_RC5 \
+	-D OPENSSL_NO_MDC2 \
+	-D HAVE_OPENSSL \
+	-D HAVE_SSL_SET_STATE \
+	-D HAVE_OPENSSL_ENGINE_H \
+	-D HAVE_ENGINE_INIT \
+	-D HAVE_ENGINE_LOAD_BUILTIN_ENGINES
+endif
+
+CS = \
+	mod_ssl.c \
+	ssl_engine_io.c \
+	ssl_engine_ocsp.c \
+	ssl_scache.c \
+	ssl_util_stapling.c \
+	ssl_engine_config.c \
+	ssl_engine_kernel.c \
+	ssl_engine_pphrase.c \
+	ssl_util.c \
+	ssl_engine_log.c \
+	ssl_engine_rand.c \
+	ssl_util_ocsp.c \
+	ssl_engine_init.c \
+	ssl_engine_mutex.c \
+	ssl_engine_vars.c \
+	ssl_util_ssl.c
+
+CC = $(APXS) -ic -n mod_ssl_av $(DEF) $(FLAGS)
+
+mod_ssl_av.so:
+	$(CC) -o "$@" $(INCLUDE) $(LIBS) $(CS)
+	cp $(INST_PATH)/modules/mod_ssl_av.so ./mod_ssl_av.so
+	
+install: mod_ssl_av.so
+
+all: mod_ssl_av.so
+
+clean:
+	-rm .libs *.o *.lo *.slo *.la -Rf
