@@ -1,0 +1,15 @@
+Модуль mod_ssl_av является доработкой модуля mod_ssl, входящего в состав Apache HTTP Server https://httpd.apache.org/ (см. modules/ssl/)
+
+В дополнение к функциональности модуля mod_ssl в модуле mod_ssl_av реализовано:
+- возможность использования переменной окружения AVKEY_PASSPHRASE для определения пароля зашифрования личного ключа
+- опция Logout для SSLOption, позволяющая завершить и удалить данные сессии (применяется для случая взаимной актунтификации)
+- логирование использования расширения extended master secret при выполнении handshake для TLS-соединения (в случае, если определена переменная окружения AVCSP_DEBUG)
+
+Для сборки: 
+git clone https://github.com/MaximKostyshin/httpd-$(HTTPD_VERSION).git modules
+cd modules/ssl_av
+make -f Makefile.apxs.linux
+
+Примечание: При необходимости переопределить переменные
+ INST_PATH=/opt/AvTLSSrv (каталог с установленным apache)
+ OPENSSL_VERSION=3.0.8 (версия OpenSSL, установленная в INST_PATH)
